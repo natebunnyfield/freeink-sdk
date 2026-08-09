@@ -417,8 +417,18 @@ void keyboard(Frame<MaxInteractions>& frame, Rect rect, const KeyboardProps& pro
       altStyle.maxLines = 1;
       altStyle.color = styles.resolve(frame.stateFor(action, key.value, state)).foreground.color;
       const int16_t altLh = frame.target().lineHeight(altStyle.font);
-      frame.target().text(Rect{static_cast<int16_t>(keyRect.x + 2), static_cast<int16_t>(keyRect.y + 2),
-                               static_cast<int16_t>(keyRect.width - 3), altLh},
+      // Breathing room around the corner hint. It used to sit 2px from the top
+      // and 3px from the right of a key whose LABEL is centred in the same box,
+      // so on a dense row ("2@ 3# 4$ ...") the hint and the glyph touched and
+      // read as one smudged character -- reported on an iPad, 2026-08-09.
+      // A hint is a hint: inset it into its corner and let the label breathe.
+      constexpr int16_t kAltMarginX = 4;  // from the key's right edge
+      constexpr int16_t kAltMarginY = 3;  // from the key's top edge
+      // Never let the hint span more than half the key: past that it stops
+      // reading as a corner mark and starts competing with the label.
+      const int16_t altW = static_cast<int16_t>(keyRect.width / 2);
+      frame.target().text(Rect{static_cast<int16_t>(keyRect.x + keyRect.width - kAltMarginX - altW),
+                               static_cast<int16_t>(keyRect.y + kAltMarginY), altW, altLh},
                           key.alt, altStyle);
       return;
     }
