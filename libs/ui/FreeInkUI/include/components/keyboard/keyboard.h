@@ -371,8 +371,19 @@ void keyboard(Frame<MaxInteractions>& frame, Rect rect, const KeyboardProps& pro
     if (props.selectedIndex == selectedIndex) state |= props.inactiveSelection ? StateFocused : StateSelected;
     if (!key.enabled || key.kind == KeyKind::Disabled) state |= StateDisabled;
     const ActionId action = actionFor(key.kind);
+    // A key carrying a corner hint reserves a top band for it and centres its
+    // label in what is LEFT. Centring the label in the whole key put the glyph
+    // and the hint in the same corner -- on a narrow number row they collided
+    // outright ('5%' and '7&' rendered as one struck-through mark, iPad
+    // 2026-08-09). Drawing the button label-less and placing the label here is
+    // what makes the two boxes disjoint; the background, states and hit target
+    // are unchanged.
+    const bool hasAltHint = key.kind == KeyKind::Normal && key.alt;
+    const int16_t altBand =
+        hasAltHint ? static_cast<int16_t>(frame.target().lineHeight(props.altText.font)) : 0;
+
     ButtonProps bp;
-    bp.label = (key.kind == KeyKind::Space || key.kind == KeyKind::Delete) ? nullptr : key.label;
+    bp.label = (key.kind == KeyKind::Space || key.kind == KeyKind::Delete || hasAltHint) ? nullptr : key.label;
     if (key.kind == KeyKind::Ok && props.okLabel) bp.label = props.okLabel;
     if (key.kind == KeyKind::Shift && props.shiftLabel) bp.label = props.shiftLabel;
     if (key.kind == KeyKind::Mode && props.modeLabel) bp.label = props.modeLabel;
@@ -407,6 +418,16 @@ void keyboard(Frame<MaxInteractions>& frame, Rect rect, const KeyboardProps& pro
       frame.target().bitmap(centeredRect(keyRect, Size{iconSize, iconSize}), lucideDeleteIcon16(),
                             BitmapMode::Contain, ink);
       return;
+    }
+
+    if (hasAltHint) {
+      // The label, centred below the reserved band.
+      TextStyle labelStyle = keyText;
+      labelStyle.color = styles.resolve(frame.stateFor(action, key.value, state)).foreground.color;
+      const int16_t labelLh = frame.target().lineHeight(labelStyle.font);
+      const int16_t labelTop = static_cast<int16_t>(
+          keyRect.y + altBand + (keyRect.height - altBand - labelLh) / 2);
+      frame.target().text(Rect{keyRect.x, labelTop, keyRect.width, labelLh}, key.label, labelStyle);
     }
 
     if (key.kind == KeyKind::Normal && key.alt) {
