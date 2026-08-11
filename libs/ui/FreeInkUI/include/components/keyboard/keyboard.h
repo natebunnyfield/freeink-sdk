@@ -389,6 +389,7 @@ void keyboard(Frame<MaxInteractions>& frame, Rect rect, const KeyboardProps& pro
   };
 
   int16_t rowHitOverflow = 0;  // set per row: bottomHitOverflow on the last row
+  bool rowHasAlt = false;      // set per row: does ANY key in it carry an alt
   auto drawKey = [&](Rect keyRect, const KeyboardKey& key, int16_t selectedIndex) {
     State state = StateNormal;
     if (props.selectedIndex == selectedIndex) state |= props.inactiveSelection ? StateFocused : StateSelected;
@@ -402,16 +403,17 @@ void keyboard(Frame<MaxInteractions>& frame, Rect rect, const KeyboardProps& pro
     // what makes the two boxes disjoint; the background, states and hit target
     // are unchanged.
     //
-    // THE BAND IS KEYED ON `alt`, THE HINT ON `showAltHint`, and they are
-    // deliberately not the same test. A key whose hint is suppressed keeps its
-    // band and its lowered label, so it stays aligned with the neighbours that
-    // still carry one -- drop the band with the hint and the number row's
-    // digits sit at two different heights (owner: "do not resize or alter
+    // THE BAND IS PER ROW, THE HINT IS PER KEY, and they are deliberately not
+    // the same test. Reserving the band only on the keys that carry a hint puts
+    // two label baselines in one row -- ':' and '\' sitting low against '.' and
+    // '?' beside them -- and the same split appears when a hint is suppressed
+    // because the character has its own key. A row that hints anything bands
+    // everything, so one row means one baseline (owner: "do not resize or alter
     // layout of keys after taking alt hint away").
-    const bool hasAltHint = key.kind == KeyKind::Normal && key.alt;
-    const bool showAltHint = hasAltHint && !altHasDedicatedKey(key.alt);
+    const bool showAltHint = key.kind == KeyKind::Normal && key.alt && !altHasDedicatedKey(key.alt);
     const int16_t altBand =
-        hasAltHint ? static_cast<int16_t>(frame.target().lineHeight(props.altText.font)) : 0;
+        rowHasAlt ? static_cast<int16_t>(frame.target().lineHeight(props.altText.font)) : 0;
+    const bool hasAltHint = altBand > 0;
 
     ButtonProps bp;
     bp.label = (key.kind == KeyKind::Space || key.kind == KeyKind::Delete || hasAltHint) ? nullptr : key.label;
@@ -498,6 +500,13 @@ void keyboard(Frame<MaxInteractions>& frame, Rect rect, const KeyboardProps& pro
     const KeyboardRow& layoutRow = props.layout->rows[row];
     if (!layoutRow.keys || layoutRow.count == 0) continue;
     rowHitOverflow = row == props.layout->rowCount - 1 ? props.bottomHitOverflow : 0;
+    rowHasAlt = false;
+    for (uint8_t col = 0; col < layoutRow.count; ++col) {
+      if (layoutRow.keys[col].kind == KeyKind::Normal && layoutRow.keys[col].alt) {
+        rowHasAlt = true;
+        break;
+      }
+    }
     uint16_t units = static_cast<uint16_t>(layoutRow.insetUnits * 2);
     for (uint8_t col = 0; col < layoutRow.count; ++col) {
       units = static_cast<uint16_t>(units + (layoutRow.keys[col].widthUnits ? layoutRow.keys[col].widthUnits : 1));
