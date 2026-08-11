@@ -526,6 +526,29 @@ void keyboard(Frame<MaxInteractions>& frame, Rect rect, const KeyboardProps& pro
     return props.keyAction;
   };
 
+  // Is this alternate ALSO a key of its own somewhere in the layout? Several
+  // are: '!' is 1's long-press and its own key one row down, as are '@', '&'
+  // and '+'. Hinting those adds ink that teaches nothing -- the character is
+  // already one press away in plain sight. Owner ruling 2026-08-10.
+  //
+  // Compares `output`, not `label`, because output is what the key actually
+  // types and is what `alt` is measured against; label may be decorated. No
+  // self-match is possible: a key's own output is never its own alt.
+  auto altHasDedicatedKey = [&](const char* alt) {
+    if (!alt || !props.layout || !props.layout->rows) return false;
+    for (uint8_t r = 0; r < props.layout->rowCount; ++r) {
+      const KeyboardRow& scanRow = props.layout->rows[r];
+      if (!scanRow.keys) continue;
+      for (uint8_t c = 0; c < scanRow.count; ++c) {
+        const KeyboardKey& k = scanRow.keys[c];
+        if (k.kind != KeyKind::Normal) continue;
+        const char* out = k.output ? k.output : k.label;
+        if (out && strcmp(out, alt) == 0) return true;
+      }
+    }
+    return false;
+  };
+
   int16_t rowHitOverflow = 0;  // set per row: bottomHitOverflow on the last row
   auto drawKey = [&](Rect keyRect, const KeyboardKey& key, int16_t selectedIndex) {
     State state = StateNormal;
@@ -539,7 +562,15 @@ void keyboard(Frame<MaxInteractions>& frame, Rect rect, const KeyboardProps& pro
     // 2026-08-09). Drawing the button label-less and placing the label here is
     // what makes the two boxes disjoint; the background, states and hit target
     // are unchanged.
+    //
+    // THE BAND IS KEYED ON `alt`, THE HINT ON `showAltHint`, and they are
+    // deliberately not the same test. A key whose hint is suppressed keeps its
+    // band and its lowered label, so it stays aligned with the neighbours that
+    // still carry one -- drop the band with the hint and the number row's
+    // digits sit at two different heights (owner: "do not resize or alter
+    // layout of keys after taking alt hint away").
     const bool hasAltHint = key.kind == KeyKind::Normal && key.alt;
+    const bool showAltHint = hasAltHint && !altHasDedicatedKey(key.alt);
     const int16_t altBand =
         hasAltHint ? static_cast<int16_t>(frame.target().lineHeight(props.altText.font)) : 0;
 
@@ -591,7 +622,7 @@ void keyboard(Frame<MaxInteractions>& frame, Rect rect, const KeyboardProps& pro
       frame.target().text(Rect{keyRect.x, labelTop, keyRect.width, labelLh}, key.label, labelStyle);
     }
 
-    if (key.kind == KeyKind::Normal && key.alt) {
+    if (showAltHint) {
       // Corner hint for the long-press alternate. Ink follows the key's
       // resolved foreground so the hint stays legible on selected/active keys.
       TextStyle altStyle = props.altText;
