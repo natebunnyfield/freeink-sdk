@@ -549,6 +549,25 @@ void keyboard(Frame<MaxInteractions>& frame, Rect rect, const KeyboardProps& pro
     return false;
   };
 
+  // ONE stroke weight for the three drawn special keys, taken from the Delete
+  // icon so Space and Return sit at the same weight as the artwork beside them
+  // (owner ruling 2026-08-11: "look at stroke width for the outside of the
+  // delete button use that for styling the horizontal lines of Space and
+  // Return").
+  //
+  // Delete is a 16 px bitmap scaled to an integer multiple, so its weight is
+  // not a number in this file -- it was MEASURED off the rendered panel: its
+  // outline came out 4-5 device px where Space's rule was 7 and Return's
+  // strokes were 3. Three is what puts all three within a pixel of each other.
+  constexpr int16_t kSpecialStroke = 3;
+  // The return arrow needs one more to LAND at the same weight. Same constant,
+  // different result: measured on the panel, a 3 there comes out 3 device px
+  // while the space rule's 3 comes out 5, because the panel presents at a
+  // fractional scale (0.905) and the two shapes sit on different sub-pixel
+  // boundaries. Matching the drawn OUTPUT is the instruction; matching the
+  // input number would have left the arrow visibly lighter.
+  constexpr int16_t kArrowStroke = kSpecialStroke + 1;
+
   int16_t rowHitOverflow = 0;  // set per row: bottomHitOverflow on the last row
   bool rowHasAlt = false;      // set per row: does ANY key in it carry an alt
   auto drawKey = [&](Rect keyRect, const KeyboardKey& key, int16_t selectedIndex) {
@@ -646,14 +665,14 @@ void keyboard(Frame<MaxInteractions>& frame, Rect rect, const KeyboardProps& pro
       const int16_t bottom = static_cast<int16_t>(cy + h / 2);
       const int16_t barb = static_cast<int16_t>(h / 2);
       // Riser down the right, shaft left along the bottom, then the two barbs.
-      frame.target().line(Point{right, top}, Point{right, bottom}, 2, ink);
-      frame.target().line(Point{right, bottom}, Point{left, bottom}, 2, ink);
+      frame.target().line(Point{right, top}, Point{right, bottom}, kArrowStroke, ink);
+      frame.target().line(Point{right, bottom}, Point{left, bottom}, kArrowStroke, ink);
       frame.target().line(Point{left, bottom}, Point{static_cast<int16_t>(left + barb),
                                                      static_cast<int16_t>(bottom - barb)},
-                          2, ink);
+                          kArrowStroke, ink);
       frame.target().line(Point{left, bottom}, Point{static_cast<int16_t>(left + barb),
                                                      static_cast<int16_t>(bottom + barb)},
-                          2, ink);
+                          kArrowStroke, ink);
       return;
     }
 
@@ -727,9 +746,10 @@ void keyboard(Frame<MaxInteractions>& frame, Rect rect, const KeyboardProps& pro
     if (ridge < 2) ridge = 2;
     const int16_t left = static_cast<int16_t>(cx - half);
     const int16_t right = static_cast<int16_t>(cx + half);
-    frame.target().line(Point{left, base}, Point{right, base}, 4, ink);
-    frame.target().line(Point{left, base}, Point{left, static_cast<int16_t>(base - ridge)}, 2, ink);
-    frame.target().line(Point{right, base}, Point{right, static_cast<int16_t>(base - ridge)}, 2, ink);
+    frame.target().line(Point{left, base}, Point{right, base}, kSpecialStroke, ink);
+    frame.target().line(Point{left, base}, Point{left, static_cast<int16_t>(base - ridge)}, kSpecialStroke, ink);
+    frame.target().line(Point{right, base}, Point{right, static_cast<int16_t>(base - ridge)}, kSpecialStroke,
+                        ink);
   };
 
   for (uint8_t row = 0; row < props.layout->rowCount; ++row) {
