@@ -497,12 +497,30 @@ void keyboard(Frame<MaxInteractions>& frame, Rect rect, const KeyboardProps& pro
     }
 
     if (hasAltHint) {
-      // The label, centred below the reserved band.
+      // The label, centred below the reserved band and then LIFTED.
+      //
+      // Centring alone put the label's box within a pixel or two of the key's
+      // lower boundary, because the band eats from the top and the body line
+      // height very nearly fills what is left. A banded row therefore read as
+      // having no bottom margin while the plain rows above and below both had
+      // one -- visible as symbols sitting on the edge of their cells (owner
+      // 2026-08-11: "move all the third row symbols up enough so they don't
+      // lack a bottom border").
+      //
+      // Clamped, so the lift can never climb into the hint: the label may rise
+      // to two thirds of the band and no further. The hint's ink sits in the
+      // upper part of its own line box, so that much overlap of the BOXES costs
+      // nothing, and the clamp is what stops a taller body font from undoing
+      // the collision fix this band exists for.
       TextStyle labelStyle = keyText;
       labelStyle.color = styles.resolve(frame.stateFor(action, key.value, state)).foreground.color;
       const int16_t labelLh = frame.target().lineHeight(labelStyle.font);
-      const int16_t labelTop = static_cast<int16_t>(
+      const int16_t centred = static_cast<int16_t>(
           keyRect.y + altBand + (keyRect.height - altBand - labelLh) / 2);
+      const int16_t lift = static_cast<int16_t>(keyRect.height / 10);
+      const int16_t highest = static_cast<int16_t>(keyRect.y + altBand * 2 / 3);
+      const int16_t lifted = static_cast<int16_t>(centred - lift);
+      const int16_t labelTop = lifted < highest ? highest : lifted;
       frame.target().text(Rect{keyRect.x, labelTop, keyRect.width, labelLh}, key.label, labelStyle);
     }
 
