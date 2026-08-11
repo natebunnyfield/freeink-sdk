@@ -415,9 +415,24 @@ void keyboard(Frame<MaxInteractions>& frame, Rect rect, const KeyboardProps& pro
         rowHasAlt ? static_cast<int16_t>(frame.target().lineHeight(props.altText.font)) : 0;
     const bool hasAltHint = altBand > 0;
 
+    // An Ok key too narrow for its word draws a return arrow instead. "OK" in a
+    // one-unit cell came out as "..." -- the truncation is silent, and an
+    // ellipsis names nothing at all. Measured rather than assumed, so a wide Ok
+    // (the URL keyboard's, two units) keeps its localized word and only the
+    // square one falls back to the glyph.
+    // Two tests, because either alone is wrong. widthUnits <= 1 is structural:
+    // one grid cell never holds a word, whatever the word is or how wide the
+    // keyboard gets. The measurement catches the rest, and subtracts the 8 px
+    // button() insets for its content box -- measuring against the full key
+    // rect is what let "OK" pass as fitting and then render as "...".
+    const char* okText = key.kind == KeyKind::Ok ? (props.okLabel ? props.okLabel : key.label) : nullptr;
+    const bool okNeedsGlyph =
+        okText && (key.widthUnits <= 1 ||
+                   frame.target().measureText(keyText.font, okText, keyText).width > keyRect.width - 8);
+
     ButtonProps bp;
     bp.label = (key.kind == KeyKind::Space || key.kind == KeyKind::Delete || hasAltHint) ? nullptr : key.label;
-    if (key.kind == KeyKind::Ok && props.okLabel) bp.label = props.okLabel;
+    if (key.kind == KeyKind::Ok) bp.label = okNeedsGlyph ? nullptr : okText;
     if (key.kind == KeyKind::Shift && props.shiftLabel) bp.label = props.shiftLabel;
     if (key.kind == KeyKind::Mode && props.modeLabel) bp.label = props.modeLabel;
     if (key.kind == KeyKind::Lang && props.langLabel) bp.label = props.langLabel;
@@ -450,6 +465,34 @@ void keyboard(Frame<MaxInteractions>& frame, Rect rect, const KeyboardProps& pro
       if (iconSize > maxSize) iconSize = maxSize;
       frame.target().bitmap(centeredRect(keyRect, Size{iconSize, iconSize}), lucideDeleteIcon16(),
                             BitmapMode::Contain, ink);
+      return;
+    }
+
+    if (okNeedsGlyph) {
+      // A return arrow, drawn rather than shipped as art: it is three strokes,
+      // and a 16px bitmap would need the same integer-scaling care the delete
+      // icon documents above. Sized from the label's line height so it reads at
+      // the weight of the characters around it.
+      const Paint ink = styles.resolve(frame.stateFor(action, key.value, state)).foreground;
+      const int16_t lh = frame.target().lineHeight(keyText.font);
+      const int16_t w = static_cast<int16_t>(lh * 3 / 4);
+      const int16_t h = static_cast<int16_t>(lh / 2);
+      const int16_t cx = static_cast<int16_t>(keyRect.x + keyRect.width / 2);
+      const int16_t cy = static_cast<int16_t>(keyRect.y + keyRect.height / 2);
+      const int16_t left = static_cast<int16_t>(cx - w / 2);
+      const int16_t right = static_cast<int16_t>(cx + w / 2);
+      const int16_t top = static_cast<int16_t>(cy - h / 2);
+      const int16_t bottom = static_cast<int16_t>(cy + h / 2);
+      const int16_t barb = static_cast<int16_t>(h / 2);
+      // Riser down the right, shaft left along the bottom, then the two barbs.
+      frame.target().line(Point{right, top}, Point{right, bottom}, 2, ink);
+      frame.target().line(Point{right, bottom}, Point{left, bottom}, 2, ink);
+      frame.target().line(Point{left, bottom}, Point{static_cast<int16_t>(left + barb),
+                                                     static_cast<int16_t>(bottom - barb)},
+                          2, ink);
+      frame.target().line(Point{left, bottom}, Point{static_cast<int16_t>(left + barb),
+                                                     static_cast<int16_t>(bottom + barb)},
+                          2, ink);
       return;
     }
 
