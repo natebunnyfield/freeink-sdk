@@ -531,12 +531,26 @@ void keyboard(Frame<MaxInteractions>& frame, Rect rect, const KeyboardProps& pro
     }
 
     if (key.kind != KeyKind::Space) return;
+    // A square bracket laid on its side: a wide, thick rule low in the key with
+    // two short ridges turning up at its ends. Chosen from five drawn options
+    // (owner, 2026-08-11: "go with b but shorter and lower and thicken the
+    // horizontal line").
+    //
+    // It replaces a bare centred rule, which in a one-cell key read as a hyphen
+    // sitting where a character would be. Everything here is proportional to the
+    // key, so the same mark works on this grid's single cell and on a QWERTY
+    // space bar seven units wide.
     const Paint ink = styles.resolve(frame.stateFor(action, key.value, state)).foreground;
     const int16_t cx = static_cast<int16_t>(keyRect.x + keyRect.width / 2);
-    const int16_t cy = static_cast<int16_t>(keyRect.y + keyRect.height / 2);
-    const int16_t half = static_cast<int16_t>(keyRect.width * 3 / 10);
-    frame.target().line(Point{static_cast<int16_t>(cx - half), static_cast<int16_t>(cy + 3)},
-                        Point{static_cast<int16_t>(cx + half), static_cast<int16_t>(cy + 3)}, 3, ink);
+    const int16_t half = static_cast<int16_t>(keyRect.width * 44 / 100);
+    const int16_t base = static_cast<int16_t>(keyRect.y + keyRect.height * 5 / 6);
+    int16_t ridge = static_cast<int16_t>(keyRect.height / 12);
+    if (ridge < 2) ridge = 2;
+    const int16_t left = static_cast<int16_t>(cx - half);
+    const int16_t right = static_cast<int16_t>(cx + half);
+    frame.target().line(Point{left, base}, Point{right, base}, 4, ink);
+    frame.target().line(Point{left, base}, Point{left, static_cast<int16_t>(base - ridge)}, 2, ink);
+    frame.target().line(Point{right, base}, Point{right, static_cast<int16_t>(base - ridge)}, 2, ink);
   };
 
   for (uint8_t row = 0; row < props.layout->rowCount; ++row) {
