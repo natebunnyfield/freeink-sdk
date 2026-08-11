@@ -504,8 +504,19 @@ void keyboard(Frame<MaxInteractions>& frame, Rect rect, const KeyboardProps& pro
       const int16_t bottom = static_cast<int16_t>(cy + h / 2);
       const int16_t barb = static_cast<int16_t>(h / 2);
       // Riser down the right, shaft left along the bottom, then the two barbs.
-      frame.target().line(Point{right, top}, Point{right, bottom}, kArrowStroke, ink);
-      frame.target().line(Point{right, bottom}, Point{left, bottom}, kArrowStroke, ink);
+      //
+      // Riser and shaft are RECTS for the reason the space bracket's are: the
+      // corner they meet at is the arrow's one bottom corner, and it is rounded
+      // to match (owner ruling 2026-08-11). Drawn as lines the riser grew
+      // rightward off `right`, sitting outside the shaft's end with an unfilled
+      // step between them; a rect ends exactly where it is told and fill() can
+      // carry the radius. The barbs stay lines -- they are diagonal, they have
+      // no corner to round, and a rect cannot express them.
+      frame.target().fill(Rect{static_cast<int16_t>(right - kArrowStroke + 1), top, kArrowStroke,
+                               static_cast<int16_t>(bottom - top + 1)},
+                          ink);
+      frame.target().fill(Rect{left, bottom, static_cast<int16_t>(right - left + 1), kArrowStroke}, ink,
+                          kArrowStroke, CornerBottomRight);
       frame.target().line(Point{left, bottom}, Point{static_cast<int16_t>(left + barb),
                                                      static_cast<int16_t>(bottom - barb)},
                           kArrowStroke, ink);
@@ -585,9 +596,38 @@ void keyboard(Frame<MaxInteractions>& frame, Rect rect, const KeyboardProps& pro
     if (ridge < 2) ridge = 2;
     const int16_t left = static_cast<int16_t>(cx - half);
     const int16_t right = static_cast<int16_t>(cx + half);
-    frame.target().line(Point{left, base}, Point{right, base}, kSpecialStroke, ink);
-    frame.target().line(Point{left, base}, Point{left, static_cast<int16_t>(base - ridge)}, kSpecialStroke, ink);
-    frame.target().line(Point{right, base}, Point{right, static_cast<int16_t>(base - ridge)}, kSpecialStroke,
+    // RECTS, not lines, so the two bottom corners can be ROUNDED (owner rulings
+    // 2026-08-11: "the bottom corners of the space symbol need to match", then
+    // "make bottom corners rounded (the better version of notching them)").
+    //
+    // As lines they could not match. A stroke grows in ONE direction from the
+    // line it is handed -- rightward for an upright -- so the left upright drawn
+    // on `left` landed flush with the base while the right one drawn on `right`
+    // hung a stroke-width past it and left a step. Rects place both edges
+    // explicitly, and fill() takes a radius with per-corner flags, which lines
+    // cannot express at all.
+    //
+    // The corner treatment goes on the BASE's two bottom corners, which are the
+    // U's outer corners; the uprights sit square on top of it, flush with its
+    // ends.
+    //
+    // A 45-degree CHAMFER here and a ROUND on the return arrow (owner ruling
+    // 2026-08-11, from the two drawn versions: "return needs A, space needs B").
+    // The chamfer is the cut the Delete icon two keys up already uses, and this
+    // mark sits between the two -- each row of the base is one pixel shorter at
+    // both ends than the row above it. fill() has no chamfer mode, so it is
+    // stated as the rows themselves; the arrow gets fill()'s radius instead.
+    const int16_t width = static_cast<int16_t>(right - left + 1);
+    for (int16_t i = 0; i < kSpecialStroke; ++i)
+      frame.target().fill(Rect{static_cast<int16_t>(left + i), static_cast<int16_t>(base + i),
+                               static_cast<int16_t>(width - 2 * i), 1},
+                          ink);
+    frame.target().fill(Rect{left, static_cast<int16_t>(base - ridge), kSpecialStroke,
+                             static_cast<int16_t>(ridge + 1)},
+                        ink);
+    frame.target().fill(Rect{static_cast<int16_t>(right - kSpecialStroke + 1),
+                             static_cast<int16_t>(base - ridge), kSpecialStroke,
+                             static_cast<int16_t>(ridge + 1)},
                         ink);
   };
 
