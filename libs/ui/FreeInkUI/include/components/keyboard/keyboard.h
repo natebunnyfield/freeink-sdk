@@ -649,9 +649,8 @@ void keyboard(Frame<MaxInteractions>& frame, Rect rect, const KeyboardProps& pro
     }
 
     if (okNeedsGlyph) {
-      // A return arrow, drawn rather than shipped as art: it is three strokes,
-      // and a 16px bitmap would need the same integer-scaling care the delete
-      // icon documents above. Sized from the label's line height so it reads at
+      // A return arrow, drawn rather than shipped as art: a riser, a shaft, and a
+      // solid triangular head. Sized from the label's line height so it reads at
       // the weight of the characters around it.
       const Paint ink = styles.resolve(frame.stateFor(action, key.value, state)).foreground;
       const int16_t lh = frame.target().lineHeight(keyText.font);
@@ -661,29 +660,62 @@ void keyboard(Frame<MaxInteractions>& frame, Rect rect, const KeyboardProps& pro
       const int16_t cy = static_cast<int16_t>(keyRect.y + keyRect.height / 2);
       const int16_t left = static_cast<int16_t>(cx - w / 2);
       const int16_t right = static_cast<int16_t>(cx + w / 2);
-      const int16_t top = static_cast<int16_t>(cy - h / 2);
-      const int16_t bottom = static_cast<int16_t>(cy + h / 2);
-      const int16_t barb = static_cast<int16_t>(h / 2);
-      // Riser down the right, shaft left along the bottom, then the two barbs.
+
+      // The head is a TRIANGLE, and is filled as one.
+      //
+      // It used to be two thick line()s fanning from a shared origin, which
+      // cannot produce a point: each stroke terminates in a flat cap
+      // kArrowStroke wide, so the two caps overlap into a lozenge and the tip
+      // arrives chiselled (owner, 2026-08-15: "the arrowhead on the return icon
+      // does not come to a triangular point"). A filled triangle has an actual
+      // vertex -- one pixel column at the apex -- which is the only way to get
+      // one. Nothing had to be plumbed for this: DrawTarget::triangle() already
+      // existed (FreeInkUICore.h:704) and already routed to
+      // GfxRenderer::fillPolygon (FreeInkUIGfxRenderer.h:123-128). The old code
+      // simply did not use it.
+      const int16_t headHalf = static_cast<int16_t>(h / 2);     // half the head's height
+      const int16_t headLen = static_cast<int16_t>(h * 2 / 3);  // apex to base
+
+      // Anchoring the head to the shaft's CENTRELINE also fixes two symmetry
+      // faults the old construction carried:
+      //
+      //  1. The barbs fanned from {left, bottom}, which is the shaft's TOP row,
+      //     not its middle -- so the head sat half a stroke high against the
+      //     shaft it terminates.
+      //  2. drawLine() grows thickness along the run's minor axis in ONE
+      //     direction, and for a 45-degree run that direction is +y for BOTH
+      //     barbs -- so the upper barb thickened away from the axis and the
+      //     lower one into it, skewing the head downward.
+      //
+      // And a third fault, which is why the extents are computed rather than
+      // assumed: the glyph was not centred in its key. Its ink ran from `top`
+      // down to bottom + barb + kArrowStroke, i.e. roughly h/2 further below the
+      // key's centre than above it, so the whole arrow sat low in the cell.
+      const int16_t above = h;  // riser top, measured above the shaft centreline
+      const int16_t below =
+          headHalf > kArrowStroke / 2 ? headHalf : static_cast<int16_t>(kArrowStroke / 2);
+      const int16_t yMid = static_cast<int16_t>(cy + (above - below) / 2);
+      const int16_t top = static_cast<int16_t>(yMid - above);
+      const int16_t shaftTop = static_cast<int16_t>(yMid - kArrowStroke / 2);
+      const int16_t baseX = static_cast<int16_t>(left + headLen);
+
+      // Riser down the right, shaft left along the bottom, then the head.
       //
       // Riser and shaft are RECTS for the reason the space bracket's are: the
       // corner they meet at is the arrow's one bottom corner, and it is rounded
       // to match (owner ruling 2026-08-11). Drawn as lines the riser grew
       // rightward off `right`, sitting outside the shaft's end with an unfilled
       // step between them; a rect ends exactly where it is told and fill() can
-      // carry the radius. The barbs stay lines -- they are diagonal, they have
-      // no corner to round, and a rect cannot express them.
+      // carry the radius. The riser stops at the shaft's TOP row on purpose --
+      // running it the full depth of the shaft would fill the very pixels the
+      // rounding leaves empty and quietly square that corner off again.
       frame.target().fill(Rect{static_cast<int16_t>(right - kArrowStroke + 1), top, kArrowStroke,
-                               static_cast<int16_t>(bottom - top + 1)},
+                               static_cast<int16_t>(shaftTop - top + 1)},
                           ink);
-      frame.target().fill(Rect{left, bottom, static_cast<int16_t>(right - left + 1), kArrowStroke}, ink,
-                          kArrowStroke, CornerBottomRight);
-      frame.target().line(Point{left, bottom}, Point{static_cast<int16_t>(left + barb),
-                                                     static_cast<int16_t>(bottom - barb)},
-                          kArrowStroke, ink);
-      frame.target().line(Point{left, bottom}, Point{static_cast<int16_t>(left + barb),
-                                                     static_cast<int16_t>(bottom + barb)},
-                          kArrowStroke, ink);
+      frame.target().fill(Rect{baseX, shaftTop, static_cast<int16_t>(right - baseX + 1), kArrowStroke},
+                          ink, kArrowStroke, CornerBottomRight);
+      frame.target().triangle(Point{left, yMid}, Point{baseX, static_cast<int16_t>(yMid - headHalf)},
+                              Point{baseX, static_cast<int16_t>(yMid + headHalf)}, ink);
       return;
     }
 
