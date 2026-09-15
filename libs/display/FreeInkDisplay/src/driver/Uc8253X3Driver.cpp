@@ -426,42 +426,52 @@ void Uc8253X3Driver::writeGrayscalePlaneStrip(EpdBus& bus, GrayPlane plane, cons
 // -> triggerRefresh), and writeGrayscalePlaneStrip() already emits a row band in
 // gate space. This is those two put together with a sub-rectangle.
 //
+// `prev` IS IGNORED, AND THAT IS THE POINT ON THIS CONTROLLER. The first
+// version of this function required a host-side previous frame, copied from the
+// SSD1677 driver's shape -- and the consuming firmware builds with
+// EINK_DISPLAY_SINGLE_BUFFER_MODE, so `prev` is always null and every window
+// fell back to the whole panel. The function was a no-op in the only build that
+// calls it. It is also unnecessary: displayFinish() ends every refresh by
+// syncing DTM1 with the frame it just displayed ("Sync DTM1 (old RAM) with the
+// current frame for the next fast diff"), so THE CONTROLLER ALREADY HOLDS THE
+// PREVIOUS FRAME. Writing a host copy over it was at best redundant and at
+// worst wrong. We write the new rows to DTM2, refresh, then sync DTM1 for the
+// window's rows only -- exactly what displayFinish does for the whole panel.
+//
 // THE BAND IS FULL WIDTH, AND THAT IS DELIBERATE. `x` and `w` are accepted and
 // ignored: every PTL window this driver has ever sent spans 0..(_w-1), so
 // horizontal windowing is the one part of the sequence with no evidence behind
 // it on this controller, and a wrong X window on a UC8253 corrupts the region
 // rather than failing. A row band is also the shape the caller actually wants --
-// a changed line of text, a battery icon's row, a keyboard key -- and it is
-// where all of the saving is: the waveform runs over the gates in the window, so
-// the cost is proportional to HEIGHT. Horizontal windowing can be added later by
-// someone with a panel in front of them; until then the honest thing is to be
-// full width rather than to guess.
+// a changed line of text, a battery icon's rows, a menu's selection bar -- and
+// it is where all of the saving is: the waveform runs over the gates in the
+// window, so the cost is proportional to HEIGHT.
 //
 // GATE SPACE, BOTTOM-FIRST. Logical row y lives at gate (_h - 1 - y) and rows
 // must be emitted bottom-first so they land on the same gates the full-frame
 // write uses -- the comment on writeGrayscalePlaneStrip() records that this was
 // the fix for AA/image banding, i.e. it was got wrong once already.
-//
-// BOTH PLANES ARE WRITTEN. DTM2 takes the new rows and DTM1 the previous ones,
-// because the Fast bank is differential: it drives each pixel from its OLD
-// state to its new one. Feeding DTM2 alone leaves DTM1 holding whatever the last
-// full frame left there, and the waveform then drives against a stale baseline
-// -- which on this panel is the classic "the window updates but keeps a shadow"
-// failure. When the caller has no previous frame (`prev == nullptr`, the
-// single-buffer build) we cannot supply that baseline, so we refuse the window
-// and take the whole-panel path rather than render a known-wrong result.
 void Uc8253X3Driver::displayWindow(EpdBus& bus, const uint8_t* fb, const uint8_t* prev, uint16_t x, uint16_t y,
                                    uint16_t w, uint16_t h, bool turnOff) {
   (void)x;
-  (void)w;  // full width by design -- see the comment above
-  // No differential baseline, nothing to window against.
-  if (fb == nullptr || prev == nullptr || h == 0 || y >= _h) {
+  (void)w;     // full width by design -- see the comment above
+  (void)prev;  // the controller's own DTM1 is the baseline -- see above
+  if (fb == nullptr || h == 0 || y >= _h) {
+    display(bus, fb, prev, RefreshMode::Fast, turnOff);
+    return;
+  }
+  // A window is only meaningful against a known baseline. After a grayscale
+  // page DTM1 holds a gray plane rather than a BW frame, and driving the Fast
+  // bank against that corrupts the region -- the same hazard
+  // preconditionGrayscale() guards. Take the whole-panel path, which resyncs
+  // both planes.
+  if (_grayState.lsbValid || !_redRamSynced) {
     display(bus, fb, prev, RefreshMode::Fast, turnOff);
     return;
   }
   // Clamp rather than reject: a caller that asks for a band running off the
-  // bottom means "to the end", and silently refusing would send it down the
-  // whole-panel path for an off-by-one.
+  // bottom means "to the end", and refusing would send it down the whole-panel
+  // path for an off-by-one.
   if (static_cast<uint32_t>(y) + h > _h) h = static_cast<uint16_t>(_h - y);
 
   // A band this tall is not worth windowing: the per-refresh fixed cost (bank
@@ -488,26 +498,18 @@ void Uc8253X3Driver::displayWindow(EpdBus& bus, const uint8_t* fb, const uint8_t
                           static_cast<uint8_t>(gateYEnd & 0xFF),
                           0x01};
 
-  // The Fast bank, the same one a whole-panel fast refresh uses, at the same CDI
+  // The Fast bank, the same one a whole-panel fast refresh uses, at the CDI
   // displayFinish()'s own fast settle uses. Not the normal bank: this is a
-  // differential update of a small region and the strong drives are what leave
-  // a mark on the rows either side of the window.
+  // differential update of a small region, and the stronger drives are what
+  // leave a mark on the rows either side of the window.
   loadBankCdi(bus, 0x29, 0x07, _cfg.fast);
 
   bus.cmd(CMD_PARTIAL_IN);
   bus.cmdData(CMD_PARTIAL_WINDOW, win, 9);
-  // NEW rows into DTM2, bottom-first, exactly as writeGrayscalePlaneStrip does.
   bus.cmd(CMD_DTM2);
   bus.beginTxn();
   for (int r = static_cast<int>(h) - 1; r >= 0; r--) {
     bus.rawWriteBytes(fb + (static_cast<uint32_t>(y) + r) * _wb, _wb);
-  }
-  bus.endTxn();
-  // OLD rows into DTM1, so the differential has the right starting state.
-  bus.cmd(CMD_DTM1);
-  bus.beginTxn();
-  for (int r = static_cast<int>(h) - 1; r >= 0; r--) {
-    bus.rawWriteBytes(prev + (static_cast<uint32_t>(y) + r) * _wb, _wb);
   }
   bus.endTxn();
   bus.cmd(CMD_PARTIAL_OUT);
@@ -520,11 +522,21 @@ void Uc8253X3Driver::displayWindow(EpdBus& bus, const uint8_t* fb, const uint8_t
     _isScreenOn = false;
   }
 
-  // DTM1 now holds this frame's rows inside the window and the older frame's
-  // everywhere else, which is exactly the baseline the next differential wants;
-  // the caller's `prev` buffer is updated by the facade. Grayscale state is
-  // untouched -- a BW window neither validates nor invalidates the gray planes.
-  _redRamSynced = true;
+  // Sync DTM1 for the window's rows, so the NEXT diff -- windowed or whole-panel
+  // -- sees the frame that is actually on the glass. displayFinish() does this
+  // for the whole panel after every refresh; skipping it here would leave DTM1
+  // holding pre-window content inside the band and the next differential would
+  // drive against a baseline that is one edit stale.
+  bus.cmd(CMD_PARTIAL_IN);
+  bus.cmdData(CMD_PARTIAL_WINDOW, win, 9);
+  bus.cmd(CMD_DTM1);
+  bus.beginTxn();
+  for (int r = static_cast<int>(h) - 1; r >= 0; r--) {
+    bus.rawWriteBytes(fb + (static_cast<uint32_t>(y) + r) * _wb, _wb);
+  }
+  bus.endTxn();
+  bus.cmd(CMD_PARTIAL_OUT);
+  bus.cmd(CMD_DATA_STOP);
 }
 
 void Uc8253X3Driver::displayGray(EpdBus& bus, const uint8_t* fb, bool turnOff, const unsigned char* lut,
