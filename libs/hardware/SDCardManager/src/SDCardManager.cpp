@@ -379,34 +379,46 @@ uint64_t SDCardManager::sdUsedBytes() {
 
 bool SDCardManager::removeDir(const char* path) {
   auto dir = vol().open(path);
-  if (!dir) {
-    return false;
-  }
-  if (!dir.isDirectory()) {
+  if (!dir || !dir.isDirectory()) {
     return false;
   }
 
-  auto file = dir.openNextFile();
-  char name[128];
-  while (file) {
+  // Sized for FAT's longest name (255 UTF-16 units, up to 765 bytes of UTF-8).
+  // The old char[128] made getName() fail on any longer name and leave it
+  // EMPTY, so the child path became "<dir>/" -- which SdFat resolves to <dir>
+  // itself. A long-named subfolder sent the walk back into its own parent,
+  // recursing until the stack overflowed partway through a delete. Static, not
+  // per-frame: this recurses, HalStorage serializes every caller, and the name
+  // is copied into filePath before the recursive call reuses it.
+  static char name[FAT_MAX_LFN_LENGTH * 3 + 1];
+
+  for (auto file = dir.openNextFile(); file; file = dir.openNextFile()) {
+    if (file.getName(name, sizeof(name)) == 0 || name[0] == '\0') {
+      // An entry that cannot be named cannot be removed by path; carrying on
+      // would rmdir a parent that still has children.
+      if (Serial) Serial.printf("[%lu] [SD] removeDir: unreadable entry under %s, stopping\n", millis(), path);
+      return false;
+    }
     String filePath = path;
     if (!filePath.endsWith("/")) {
       filePath += "/";
     }
-    file.getName(name, sizeof(name));
     filePath += name;
 
-    if (file.isDirectory()) {
+    // Close the iterator's handle before the entry is deleted by path, so no
+    // open handle ever outlives the directory entry it was opened on.
+    const bool isDir = file.isDirectory();
+    file.close();
+
+    if (isDir) {
       if (!removeDir(filePath.c_str())) {
         return false;
       }
-    } else {
-      if (!vol().remove(filePath.c_str())) {
-        return false;
-      }
+    } else if (!vol().remove(filePath.c_str())) {
+      return false;
     }
-    file = dir.openNextFile();
   }
 
+  dir.close();
   return vol().rmdir(path);
 }
